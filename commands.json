@@ -1,0 +1,30 @@
+[
+  {
+    "name": "alert",
+    "file": "src/commands/alert.js"
+  },
+  {
+    "name": "gem",
+    "file": "src/commands/gem.js"
+  },
+  {
+    "name": "help",
+    "file": "src/commands/help.js"
+  },
+  {
+    "name": "reset",
+    "file": "src/commands/reset.js"
+  },
+  {
+    "name": "start",
+    "file": "src/commands/start.js"
+  },
+  {
+    "name": "trending",
+    "file": "src/commands/trending.js"
+  },
+  {
+    "name": "watch",
+    "file": "src/commands/watch.js"
+  }
+]
