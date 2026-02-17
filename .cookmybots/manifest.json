@@ -3,77 +3,70 @@
   "commands": [
     {
       "command": "/alert",
-      "description": "Turns alerts on or off for your account.",
+      "description": "Toggle alerts on/off for your account. If server ALERTS_ENABLED is not true, explains alerts aren’t available.",
       "usage": "/alert on | /alert off",
       "examples": [
         "User: /alert on → Bot: Alerts are now ON"
       ],
-      "example": "User: /alert on → Bot: Alerts are now ON",
-      "notes": "If ALERTS_ENABLED is not true on the server, the bot explains alerts are not available yet."
+      "notes": "This command updates per-user alert setting; global alerts loop is gated by ALERTS_ENABLED."
     },
     {
       "command": "/gem",
-      "description": "Analyzes a token by symbol/name/address and returns a structured scorecard (risk, momentum, fundamentals).",
+      "description": "Token analysis scorecard for a symbol/name/address; asks a clarifying question when ambiguous.",
       "usage": "/gem <query>",
       "examples": [
         "User: /gem BONK → Bot: scorecard",
         "User: /gem 0x1234... → Bot: scorecard"
       ],
-      "example": "User: /gem BONK → Bot: scorecard",
-      "notes": "If the query is ambiguous, the bot asks you to be more specific."
+      "notes": "Uses CookMyBots AI Gateway; if AI is not configured, returns a short fallback message."
     },
     {
       "command": "/help",
-      "description": "Lists all public commands with short examples.",
+      "description": "Lists all public commands with examples.",
       "usage": "/help",
       "examples": [
-        "User: /help → Bot: shows /gem, /trending, /watch, /alert, /reset"
+        "User: /help → Bot: shows the command list"
       ],
-      "example": "User: /help → Bot: shows /gem, /trending, /watch, /alert, /reset",
-      "notes": ""
+      "notes": "Always works even if AI is slow or misconfigured."
     },
     {
       "command": "/reset",
-      "description": "Clears long-term chat memory; optionally clears watchlist too.",
+      "description": "Clears long-term chat memory for the current user; /reset all also clears watchlist.",
       "usage": "/reset [all]",
       "examples": [
-        "User: /reset → Bot: memory cleared; suggests /reset all",
+        "User: /reset → Bot: memory cleared",
         "User: /reset all → Bot: memory and watchlist cleared"
       ],
-      "example": "User: /reset → Bot: memory cleared; suggests /reset all",
-      "notes": ""
+      "notes": "Works with MongoDB storage or in-memory fallback."
     },
     {
       "command": "/start",
-      "description": "Welcome message, examples, and the safety disclaimer.",
+      "description": "Welcome message with examples and a safety disclaimer; warns if MongoDB isn’t configured so memory/watchlists are temporary.",
       "usage": "/start",
       "examples": [
-        "User: /start → Bot: shows what Gem Scout can do and example commands"
+        "User: /start → Bot: welcome, examples, disclaimer, and DB warning if needed"
       ],
-      "example": "User: /start → Bot: shows what Gem Scout can do and example commands",
-      "notes": "If MONGODB_URI is not set, the bot warns that memory/watchlists are temporary."
+      "notes": "This command is always handled as a fast command (never goes through the AI agent handler)."
     },
     {
       "command": "/trending",
-      "description": "Shows a short list of trending/new tokens (best-effort).",
+      "description": "Best-effort trending token list (optionally filtered by chain).",
       "usage": "/trending [chain]",
       "examples": [
-        "User: /trending → Bot: list of tokens",
-        "User: /trending solana → Bot: list filtered to Solana"
+        "User: /trending → Bot: list",
+        "User: /trending solana → Bot: list"
       ],
-      "example": "User: /trending → Bot: list of tokens",
-      "notes": "Trending is best-effort and depends on public provider availability."
+      "notes": "If upstream provider is down, replies with a short best-effort error."
     },
     {
       "command": "/watch",
-      "description": "Manages your watchlist (add/remove/list).",
+      "description": "Manage your watchlist: add, remove, list. Uses MongoDB when available; otherwise in-memory fallback.",
       "usage": "/watch add <query> | /watch remove <query> | /watch list",
       "examples": [
         "User: /watch add PEPE → Bot: added",
         "User: /watch list → Bot: shows watchlist"
       ],
-      "example": "User: /watch add PEPE → Bot: added",
-      "notes": "If MONGODB_URI is not set, watchlist is in-memory and resets on deploy."
+      "notes": "In-memory watchlists reset on redeploy if MONGODB_URI is not set."
     }
   ],
   "aiMessages": [
@@ -84,6 +77,14 @@
     {
       "role": "assistant",
       "content": "Created the Gem Scout bot as a full grammY project with Render-safe long polling via @grammyjs/runner (concurrency 1, webhook cleared on boot, 409 conflict backoff). Implemented /start, /help, /gem, /trending, /watch (add/remove/list), /alert, and /reset, plus an AI catch-all agent registered after commands with strict slash-command passthrough and backpressure locks. Added MongoDB-backed long-term memory and watchlist/alert setting persistence with in-memory fallbacks when MONGODB_URI is missing. Alerts loop is included and gated behind ALERTS_ENABLED, with conservative polling and logging. Also added README.md, DOCS.md, project.json, and updated .env.sample.\n\nFiles touched (27): .env.sample, DOCS.md, README.md, package.json, project.json, src/bot.js…\nValidation: ✅ project passes syntax/basic checks after this edit."
+    },
+    {
+      "role": "user",
+      "content": "The bot is not responding, can you fix thar"
+    },
+    {
+      "role": "assistant",
+      "content": "Fixed the immediate boot crash (“Unexpected end of input”) by making command registration properly awaited, then hardened polling reliability: webhook deletion on boot, runner concurrency pinned to 1, and a restart loop for Telegram 409 conflicts that aborts the previous runner before restarting. Added production-safe diagnostics (env presence booleans, AI call start/ok/fail with latency, optional LOG_LEVEL heartbeat), tightened agent backpressure (per-chat lock + global cap) and enforced a hard AI timeout with safe unlock in finally. Also fixed a small syntax bug in the alerts message and corrected Mongo upsert safety for clearing watchlists. Appended a short troubleshooting section to README/DOCS and recorded the reliability changes in CHANGELOG.\n\nFiles touched (11): .env.sample, CHANGELOG.md, DOCS.md, README.md, package.json, src/bot.js…\nValidation: ✅ project passes syntax/basic checks after this edit."
     }
   ],
   "createdBy": "699341b3afe4e0ad112a30a2",
@@ -557,7 +558,7 @@
       "runId": "b9293023-0a4d-4e88-94f8-e5e97b830117:mlqjryjk:tw1ioh",
       "lastUserMessage": "The bot is not responding, can you fix thar",
       "startedAt": "2026-02-17T09:37:40.987Z",
-      "updatedAt": "2026-02-17T11:58:15.784Z",
+      "updatedAt": "2026-02-17T11:58:16.152Z",
       "message": "Syncing environment template with used env variables…",
       "commands": [
         {
@@ -1460,7 +1461,7 @@
     "runId": "b9293023-0a4d-4e88-94f8-e5e97b830117:mlqjryjk:tw1ioh",
     "lastUserMessage": "The bot is not responding, can you fix thar",
     "startedAt": "2026-02-17T09:37:40.987Z",
-    "updatedAt": "2026-02-17T11:58:15.784Z",
+    "updatedAt": "2026-02-17T11:58:16.152Z",
     "message": "Syncing environment template with used env variables…",
     "commands": [
       {
@@ -1909,18 +1910,18 @@
     {
       "key": "TELEGRAM_BOT_TOKEN",
       "title": "Telegram Bot Token",
-      "description": "Required to connect to Telegram Bot API.",
-      "usage": "Used by src/index.js to start the grammY bot.",
-      "howToGet": "Create a bot with @BotFather on Telegram and copy the token.",
+      "description": "Required Telegram token used to start the bot.",
+      "usage": "Read in src/lib/config.js and used by src/index.js to initialize grammY.",
+      "howToGet": "Create a bot with @BotFather and copy the token.",
       "example": "123456789:AA... (format only)",
       "isSecret": true,
       "required": true
     },
     {
       "key": "MONGODB_URI",
-      "title": "MongoDB Connection String",
-      "description": "Enables long-term memory and persistent watchlists/alert settings.",
-      "usage": "Used by src/lib/db.js; when missing the bot falls back to in-memory storage.",
+      "title": "MongoDB URI",
+      "description": "Enables persistent long-term memory and watchlists. If missing, the bot falls back to in-memory storage.",
+      "usage": "Used by src/lib/db.js and storage modules.",
       "howToGet": "Create a MongoDB database (Atlas or similar) and copy the connection string.",
       "example": "mongodb+srv://USER:PASS@cluster.example.mongodb.net/dbname",
       "isSecret": true,
@@ -1929,30 +1930,30 @@
     {
       "key": "COOKMYBOTS_AI_ENDPOINT",
       "title": "CookMyBots AI Endpoint",
-      "description": "Base URL for the CookMyBots AI Gateway. Must be a base URL (no /chat suffix).",
+      "description": "Base URL for CookMyBots AI Gateway. Must be a base URL (do not include /chat).",
       "usage": "src/lib/ai.js calls POST {COOKMYBOTS_AI_ENDPOINT}/chat.",
       "howToGet": "Provided by CookMyBots.",
       "example": "https://api.cookmybots.com/api/ai",
       "isSecret": false,
-      "required": true
+      "required": false
     },
     {
       "key": "COOKMYBOTS_AI_KEY",
       "title": "CookMyBots AI Key",
-      "description": "Auth key used to call the CookMyBots AI Gateway.",
-      "usage": "Sent as Authorization: Bearer ... in src/lib/ai.js.",
+      "description": "Bearer token for AI Gateway calls.",
+      "usage": "Sent as Authorization: Bearer ... by src/lib/ai.js.",
       "howToGet": "Provided by CookMyBots.",
       "example": "cmb_ai_... (format only)",
       "isSecret": true,
-      "required": true
+      "required": false
     },
     {
       "key": "AI_TIMEOUT_MS",
       "title": "AI Timeout (ms)",
-      "description": "Timeout for AI gateway requests.",
-      "usage": "Controls AbortController timeout in src/lib/ai.js.",
+      "description": "Hard timeout used by the agent to avoid hanging and causing perceived non-responsiveness.",
+      "usage": "Used by src/features/agent.js and forwarded to src/lib/ai.js.",
       "howToGet": "",
-      "example": "600000",
+      "example": "45000",
       "isSecret": false,
       "required": false
     },
@@ -1969,8 +1970,8 @@
     {
       "key": "ALERTS_ENABLED",
       "title": "Alerts Enabled",
-      "description": "Turns the alerts polling loop on or off for this deployment.",
-      "usage": "If true, src/features/alerts.js runs a polling loop and sends messages to users with alerts enabled.",
+      "description": "Enables the alerts polling loop when true. Defaults to false.",
+      "usage": "Used by src/features/alerts.js and /alert command gating.",
       "howToGet": "",
       "example": "true",
       "isSecret": false,
@@ -1988,11 +1989,21 @@
     },
     {
       "key": "GLOBAL_AI_INFLIGHT_MAX",
-      "title": "Global AI In-Flight Cap",
-      "description": "Maximum number of simultaneous AI jobs across the process.",
-      "usage": "Used by src/features/agent.js for backpressure.",
+      "title": "Global AI In-Flight Max",
+      "description": "Caps concurrent AI requests across the whole process (backpressure).",
+      "usage": "Used by src/features/agent.js.",
       "howToGet": "",
-      "example": "2",
+      "example": "1",
+      "isSecret": false,
+      "required": false
+    },
+    {
+      "key": "LOG_LEVEL",
+      "title": "Log Level",
+      "description": "Controls how chatty logs are (debug|info|warn|error).",
+      "usage": "Used by src/index.js to gate some periodic polling logs.",
+      "howToGet": "",
+      "example": "info",
       "isSecret": false,
       "required": false
     }
@@ -2000,70 +2011,70 @@
   "commandDocs": [
     {
       "command": "/start",
-      "description": "Welcome message, examples, and the safety disclaimer.",
+      "description": "Welcome message with examples and a safety disclaimer; warns if MongoDB isn’t configured so memory/watchlists are temporary.",
       "usage": "/start",
       "examples": [
-        "User: /start → Bot: shows what Gem Scout can do and example commands"
+        "User: /start → Bot: welcome, examples, disclaimer, and DB warning if needed"
       ],
-      "notes": "If MONGODB_URI is not set, the bot warns that memory/watchlists are temporary."
+      "notes": "This command is always handled as a fast command (never goes through the AI agent handler)."
     },
     {
       "command": "/help",
-      "description": "Lists all public commands with short examples.",
+      "description": "Lists all public commands with examples.",
       "usage": "/help",
       "examples": [
-        "User: /help → Bot: shows /gem, /trending, /watch, /alert, /reset"
+        "User: /help → Bot: shows the command list"
       ],
-      "notes": ""
+      "notes": "Always works even if AI is slow or misconfigured."
     },
     {
       "command": "/gem",
-      "description": "Analyzes a token by symbol/name/address and returns a structured scorecard (risk, momentum, fundamentals).",
+      "description": "Token analysis scorecard for a symbol/name/address; asks a clarifying question when ambiguous.",
       "usage": "/gem <query>",
       "examples": [
         "User: /gem BONK → Bot: scorecard",
         "User: /gem 0x1234... → Bot: scorecard"
       ],
-      "notes": "If the query is ambiguous, the bot asks you to be more specific."
+      "notes": "Uses CookMyBots AI Gateway; if AI is not configured, returns a short fallback message."
     },
     {
       "command": "/trending",
-      "description": "Shows a short list of trending/new tokens (best-effort).",
+      "description": "Best-effort trending token list (optionally filtered by chain).",
       "usage": "/trending [chain]",
       "examples": [
-        "User: /trending → Bot: list of tokens",
-        "User: /trending solana → Bot: list filtered to Solana"
+        "User: /trending → Bot: list",
+        "User: /trending solana → Bot: list"
       ],
-      "notes": "Trending is best-effort and depends on public provider availability."
+      "notes": "If upstream provider is down, replies with a short best-effort error."
     },
     {
       "command": "/watch",
-      "description": "Manages your watchlist (add/remove/list).",
+      "description": "Manage your watchlist: add, remove, list. Uses MongoDB when available; otherwise in-memory fallback.",
       "usage": "/watch add <query> | /watch remove <query> | /watch list",
       "examples": [
         "User: /watch add PEPE → Bot: added",
         "User: /watch list → Bot: shows watchlist"
       ],
-      "notes": "If MONGODB_URI is not set, watchlist is in-memory and resets on deploy."
+      "notes": "In-memory watchlists reset on redeploy if MONGODB_URI is not set."
     },
     {
       "command": "/alert",
-      "description": "Turns alerts on or off for your account.",
+      "description": "Toggle alerts on/off for your account. If server ALERTS_ENABLED is not true, explains alerts aren’t available.",
       "usage": "/alert on | /alert off",
       "examples": [
         "User: /alert on → Bot: Alerts are now ON"
       ],
-      "notes": "If ALERTS_ENABLED is not true on the server, the bot explains alerts are not available yet."
+      "notes": "This command updates per-user alert setting; global alerts loop is gated by ALERTS_ENABLED."
     },
     {
       "command": "/reset",
-      "description": "Clears long-term chat memory; optionally clears watchlist too.",
+      "description": "Clears long-term chat memory for the current user; /reset all also clears watchlist.",
       "usage": "/reset [all]",
       "examples": [
-        "User: /reset → Bot: memory cleared; suggests /reset all",
+        "User: /reset → Bot: memory cleared",
         "User: /reset all → Bot: memory and watchlist cleared"
       ],
-      "notes": ""
+      "notes": "Works with MongoDB storage or in-memory fallback."
     }
   ]
 }
