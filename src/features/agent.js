@@ -29,29 +29,35 @@ function pickTimeoutMs() {
   return Number.isFinite(n) && n > 0 ? n : 600000;
 }
 
+function pickGlobalMax() {
+  const v = Number(process.env.AI_MAX_GLOBAL_INFLIGHT || cfg.AI_MAX_GLOBAL_INFLIGHT || "");
+  if (Number.isFinite(v) && v > 0) return Math.floor(v);
+  return Math.max(1, Number(cfg.GLOBAL_AI_INFLIGHT_MAX || 1));
+}
+
 export function registerAgent(bot) {
   bot.on("message:text", async (ctx, next) => {
     const raw = ctx.message?.text || "";
 
     if (raw.startsWith("/")) {
-      console.log("[route] slash command passthrough", {
-        chatId: String(ctx.chat?.id || ""),
-        userId: String(ctx.from?.id || ""),
-        text: raw.slice(0, 64)
-      });
       return next();
     }
 
     const chatType = ctx.chat?.type || "private";
     const isPrivate = chatType === "private";
 
-    const botUsername = (ctx.me && ctx.me.username) || (ctx.botInfo && ctx.botInfo.username) || "";
+    const botUsername =
+      (ctx.me && ctx.me.username) ||
+      (ctx.botInfo && ctx.botInfo.username) ||
+      "";
+
     const replyTo = ctx.message?.reply_to_message;
 
     const isReplyToBot =
       !!(replyTo?.from?.is_bot) &&
       !!botUsername &&
-      String(replyTo?.from?.username || "").toLowerCase() === String(botUsername).toLowerCase();
+      String(replyTo?.from?.username || "").toLowerCase() ===
+        String(botUsername).toLowerCase();
 
     const ents = Array.isArray(ctx.message?.entities) ? ctx.message.entities : [];
     const isMentioned =
@@ -71,7 +77,9 @@ export function registerAgent(bot) {
     }
 
     if (!userText) {
-      return ctx.reply("What should I help you with? Try /trending or /gem <query>.");
+      return ctx.reply(
+        "What should I help you with? Try /trending or /gem <query>."
+      );
     }
 
     const userId = String(ctx.from?.id || "");
@@ -82,7 +90,7 @@ export function registerAgent(bot) {
       return ctx.reply("I’m working on your last request…");
     }
 
-    const globalMax = Math.max(1, Number(process.env.GLOBAL_AI_INFLIGHT_MAX || cfg.GLOBAL_AI_INFLIGHT_MAX || 2));
+    const globalMax = pickGlobalMax();
     if (globalInflight >= globalMax) {
       return ctx.reply("Busy, try again in a moment.");
     }
@@ -94,14 +102,6 @@ export function registerAgent(bot) {
     const timeoutMs = pickTimeoutMs();
 
     try {
-      console.log("[route] agent invoked", {
-        chatId,
-        userId,
-        isPrivate,
-        mentioned: isMentioned,
-        replyToBot: isReplyToBot
-      });
-
       await addTurn({
         mongoUri: cfg.MONGODB_URI,
         platform: "telegram",
@@ -142,7 +142,7 @@ export function registerAgent(bot) {
       };
 
       const res = await withTimeout(
-        aiChat(cfg, { messages, meta }, { timeoutMs, retries: cfg.AI_MAX_RETRIES }),
+        aiChat(cfg, { messages, meta }, { timeoutMs, retries: 2 }),
         timeoutMs + 1500
       );
 
@@ -166,7 +166,9 @@ export function registerAgent(bot) {
         return ctx.reply(msg);
       }
 
-      const finalText = reply.includes("Not financial advice") ? reply : `${reply}\n\n${disclaimerLine()}`;
+      const finalText = reply.includes("Not financial advice")
+        ? reply
+        : `${reply}\n\n${disclaimerLine()}`;
 
       await addTurn({
         mongoUri: cfg.MONGODB_URI,
@@ -192,7 +194,7 @@ export function registerAgent(bot) {
         ms: Date.now() - started,
         err: String(safeErr(e)).slice(0, 300)
       });
-      return ctx.reply("Something went wrong. Please try again.");
+      return ctx.reply("Something went wrong. Please try again in a moment.");
     } finally {
       globalInflight = Math.max(0, globalInflight - 1);
       perChatLock.delete(lockKey);

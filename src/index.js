@@ -4,20 +4,29 @@ import { run } from "@grammyjs/runner";
 import { cfg } from "./lib/config.js";
 import { safeErr } from "./lib/safeErr.js";
 
-process.on("unhandledRejection", (r) => {
-  console.error("[process] unhandledRejection", { err: safeErr(r) });
-});
-
-process.on("uncaughtException", (e) => {
-  console.error("[process] uncaughtException", { err: safeErr(e) });
-});
-
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+process.on("unhandledRejection", (reason) => {
+  console.error("[process] unhandledRejection", { err: safeErr(reason) });
+  // Keep the service alive; handler-level errors should be managed via bot.catch.
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[process] uncaughtException", { err: safeErr(err) });
+  // Uncaught exceptions can leave the process in a bad state. Exit so Render restarts it.
+  process.exit(1);
+});
+
 let runner = null;
+let pollingStarted = false;
 let restartLock = false;
+
+function is409(e) {
+  const msg = String(safeErr(e) || "");
+  return msg.includes("409") || msg.toLowerCase().includes("conflict");
+}
 
 async function stopRunner() {
   if (!runner) return;
@@ -27,28 +36,30 @@ async function stopRunner() {
     console.warn("[runner] abort failed", { err: safeErr(e) });
   }
   runner = null;
+  pollingStarted = false;
   await sleep(250);
 }
 
-function is409(e) {
-  const msg = String(safeErr(e) || "");
-  return msg.includes("409") || msg.toLowerCase().includes("conflict");
-}
+async function startRunnerOnce(bot) {
+  if (pollingStarted) {
+    console.warn("[boot] polling already started; skipping");
+    return;
+  }
 
-async function startRunner(bot) {
-  await bot.api.deleteWebhook({ drop_pending_updates: true }).catch((e) => {
+  // Always clear webhook first to avoid conflicts/backlog.
+  try {
+    await bot.api.deleteWebhook({ drop_pending_updates: true });
+  } catch (e) {
     console.warn("[boot] deleteWebhook failed", { err: safeErr(e) });
-  });
+  }
 
   const concurrency = 1;
   runner = run(bot, { concurrency });
+  pollingStarted = true;
   console.log("[boot] polling started", { concurrency });
 
-  runner.task.catch(async (e) => {
-    console.warn("[runner] task error", { err: safeErr(e) });
-    if (!is409(e)) return;
-    await restartPolling(bot, e);
-  });
+  // IMPORTANT: runner.task is not a Promise in runner 2.0.3.
+  // Use bot.catch for update/Telegram API errors.
 }
 
 async function restartPolling(bot, reason) {
@@ -68,12 +79,11 @@ async function restartPolling(bot, reason) {
       await sleep(backoffMs);
 
       try {
-        await startRunner(bot);
+        await startRunnerOnce(bot);
         console.log("[runner] polling restarted");
         return;
       } catch (e) {
         console.warn("[runner] restart attempt failed", { err: safeErr(e) });
-        continue;
       }
     }
 
@@ -89,7 +99,8 @@ async function boot() {
     runnerMode: "long-polling",
     tokenSet: !!cfg.TELEGRAM_BOT_TOKEN,
     mongoSet: !!cfg.MONGODB_URI,
-    aiConfigured: !!(cfg.COOKMYBOTS_AI_ENDPOINT && cfg.COOKMYBOTS_AI_KEY),
+    aiEndpointSet: !!cfg.COOKMYBOTS_AI_ENDPOINT,
+    aiKeySet: !!cfg.COOKMYBOTS_AI_KEY,
     alertsEnabled: !!cfg.ALERTS_ENABLED,
     concurrency: 1
   });
@@ -107,6 +118,37 @@ async function boot() {
   const { startAlertsLoop } = await import("./features/alerts.js");
 
   const bot = await createBot(cfg.TELEGRAM_BOT_TOKEN);
+
+  // Telegram API + handler error boundary.
+  bot.catch(async (err) => {
+    const msg = safeErr(err?.error || err);
+    const status = err?.error?.response?.error_code;
+
+    console.error("[bot] update error", {
+      err: msg,
+      status,
+      ctx: {
+        chatId: String(err?.ctx?.chat?.id || ""),
+        userId: String(err?.ctx?.from?.id || "")
+      }
+    });
+
+    // 409s can happen during deploy overlap; keep the service alive and restart polling.
+    if (status === 409 || is409(msg)) {
+      await restartPolling(bot, msg);
+      return;
+    }
+
+    // User-facing error for user-triggered updates.
+    try {
+      const chatId = err?.ctx?.chat?.id;
+      if (chatId) {
+        await err.ctx.reply("Something went wrong. Please try again in a moment.");
+      }
+    } catch (e) {
+      console.warn("[bot] failed to send user-facing error", { err: safeErr(e) });
+    }
+  });
 
   try {
     await bot.init();
@@ -134,7 +176,7 @@ async function boot() {
     console.warn("[alerts] failed to start", { err: safeErr(e) });
   }
 
-  await startRunner(bot);
+  await startRunnerOnce(bot);
 
   setInterval(() => {
     const m = process.memoryUsage();
