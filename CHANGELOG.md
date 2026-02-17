@@ -1,9 +1,5 @@
-# Changelog
 
-All notable changes to this bot project are recorded here.
-
-## 2026-02-17 09:42:00. UTC
-- Request: Idea: - Identify high-potential, early-stage crypto tokens. - Analyze new and low market cap projects. - Evaluate potential based on risk, momentum, and fundamentals. Platform: Telegram Goal: - Help users discover trend…
-- Summary: Created the Gem Scout bot as a full grammY project with Render-safe long polling via @grammyjs/runner (concurrency 1, webhook cleared on boot, 409 conflict backoff). Implemented /start, /help, /gem, /trending, /watch (a…
-- Files: .env.sample, DOCS.md, README.md, package.json, project.json, src/bot.js, src/commands/alert.js, src/commands/gem.js, src/commands/help.js, src/commands/loader.js, src/commands/reset.js, src/commands/start.js, src/commands/trending.js, src/commands/watch.js (+…
-
+## 2026-02-17 12:05:00. UTC
+- Reliability: fixed startup crash, hardened long polling with webhook deletion and 409 conflict restart backoff.
+- Diagnostics: added safer boot env logging (booleans only), AI call logs with latency, and heartbeat/memory logs.
+- Agent: added strict backpressure (per-chat lock + global cap) and hard timeout so slow AI can’t stall responsiveness.

@@ -23,7 +23,6 @@ function clampItem(item) {
     lastSnapshot: item?.lastSnapshot && typeof item.lastSnapshot === "object" ? item.lastSnapshot : null
   };
 
-  // keep lastSnapshot small
   if (out.lastSnapshot) {
     const s = out.lastSnapshot;
     out.lastSnapshot = {

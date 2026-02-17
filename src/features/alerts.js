@@ -49,7 +49,6 @@ export function startAlertsLoop(bot) {
 
         const users = usersRes?.ok ? usersRes.users : [];
 
-        // Keep cycles small and safe
         for (const userId of users.slice(0, 50)) {
           const wl = await listWatchlist({
             mongoUri: cfg.MONGODB_URI,
@@ -65,7 +64,6 @@ export function startAlertsLoop(bot) {
             const snap = snapRes.snapshot;
             const prev = item.lastSnapshot;
 
-            // Very conservative triggers (best-effort). Only if we have previous snapshot.
             if (prev) {
               const prevVol = Number(prev.volume24hUsd || 0);
               const curVol = Number(snap.volume24hUsd || 0);
@@ -85,7 +83,7 @@ export function startAlertsLoop(bot) {
 
                 const text = [
                   "Watchlist alert (best-effort)",
-                  `${item.symbol || item.name || item.address} on ${item.chain || "unknown chain"}",
+                  `${item.symbol || item.name || item.address} on ${item.chain || "unknown chain"}`,
                   why,
                   "Use /gem to re-check details.",
                   "Not financial advice."
@@ -99,8 +97,6 @@ export function startAlertsLoop(bot) {
               }
             }
 
-            // We intentionally do not persist updated lastSnapshot in MVP loop to keep DB writes minimal.
-            // The watchlist command updates lastSnapshot opportunistically when users view /watch list.
             await sleep(250);
           }
         }

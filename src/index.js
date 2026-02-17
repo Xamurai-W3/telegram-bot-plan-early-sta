@@ -5,59 +5,116 @@ import { cfg } from "./lib/config.js";
 import { safeErr } from "./lib/safeErr.js";
 
 process.on("unhandledRejection", (r) => {
-  console.error("[process] UnhandledRejection:", safeErr(r));
+  console.error("[process] unhandledRejection", { err: safeErr(r) });
 });
+
 process.on("uncaughtException", (e) => {
-  console.error("[process] UncaughtException:", safeErr(e));
-  process.exit(1);
+  console.error("[process] uncaughtException", { err: safeErr(e) });
+  // Keep process alive when feasible; most errors here are fatal, but Render will restart anyway.
 });
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function pickLogLevel() {
+  const raw = String(process.env.LOG_LEVEL || "info").toLowerCase();
+  if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") return raw;
+  return "info";
+}
+
+function shouldLog(level) {
+  const order = { debug: 10, info: 20, warn: 30, error: 40 };
+  const cur = pickLogLevel();
+  return (order[level] || 20) >= (order[cur] || 20);
+}
+
 let runner = null;
 let restarting = false;
 
+async function stopRunner() {
+  if (!runner) return;
+  try {
+    runner.abort();
+  } catch {}
+  runner = null;
+  await sleep(250);
+}
+
 async function startPolling(bot) {
-  let backoffMs = 2000;
+  const concurrency = 1;
 
-  while (true) {
+  try {
+    await bot.api.deleteWebhook({ drop_pending_updates: true });
+    if (shouldLog("info")) console.log("[boot] webhook cleared", { dropPending: true });
+  } catch (e) {
+    console.warn("[boot] deleteWebhook failed", { err: safeErr(e) });
+  }
+
+  runner = run(bot, { concurrency });
+  if (shouldLog("info")) console.log("[boot] polling started", { concurrency });
+
+  // Runner task resolves on fatal polling failure.
+  runner.task.catch(async (e) => {
+    const msg = safeErr(e);
+    console.warn("[runner] task error", { err: msg });
+
+    const isConflict = String(msg).includes("409") || String(msg).toLowerCase().includes("conflict");
+    if (!isConflict) return;
+
+    if (restarting) return;
+    restarting = true;
+
     try {
-      await bot.api.deleteWebhook({ drop_pending_updates: true });
-    } catch (e) {
-      console.warn("[boot] deleteWebhook failed:", safeErr(e));
-    }
+      const backoffs = [2000, 5000, 10000, 20000];
+      for (const ms of backoffs) {
+        console.warn("[runner] 409 conflict; restarting polling", { backoffMs: ms });
+        await stopRunner();
+        await sleep(ms);
 
-    try {
-      runner = run(bot, { concurrency: 1 });
-      console.log("[boot] polling started", { concurrency: 1 });
-      return;
-    } catch (e) {
-      const msg = safeErr(e);
-      console.warn("[boot] polling start failed", { err: msg });
+        try {
+          await bot.api.deleteWebhook({ drop_pending_updates: true });
+        } catch {}
 
-      // If getUpdates conflict occurs, backoff and retry.
-      if (String(msg).includes("409") || String(msg).toLowerCase().includes("conflict")) {
-        await sleep(backoffMs);
-        backoffMs = Math.min(20_000, Math.round(backoffMs * 2.5));
-        continue;
+        try {
+          runner = run(bot, { concurrency: 1 });
+          console.log("[runner] polling restarted", { concurrency: 1 });
+          return;
+        } catch (startErr) {
+          console.warn("[runner] restart failed", { err: safeErr(startErr) });
+          continue;
+        }
       }
 
-      throw e;
+      console.error("[runner] restart exhausted", { err: msg });
+    } finally {
+      restarting = false;
     }
-  }
+  });
+}
+
+function startPollingCycleLogs() {
+  // grammY runner doesn’t expose per-cycle hooks reliably; we log a heartbeat instead.
+  // This is enough to diagnose “not responding” without spamming.
+  setInterval(() => {
+    if (shouldLog("debug")) console.log("[poll] heartbeat", { runnerActive: !!runner });
+  }, 60_000).unref();
 }
 
 async function boot() {
   console.log("[boot] service starting", {
     nodeEnv: process.env.NODE_ENV || "",
+    logLevel: pickLogLevel(),
     tokenSet: !!cfg.TELEGRAM_BOT_TOKEN,
     mongoSet: !!cfg.MONGODB_URI,
     aiEndpointSet: !!cfg.COOKMYBOTS_AI_ENDPOINT,
     aiKeySet: !!cfg.COOKMYBOTS_AI_KEY,
     alertsEnabled: !!cfg.ALERTS_ENABLED
   });
+
+  if (!cfg.MONGODB_URI) {
+    console.warn("[boot] MONGODB_URI not set; memory/watchlist will be temporary");
+  }
 
   if (!cfg.TELEGRAM_BOT_TOKEN) {
     console.error("TELEGRAM_BOT_TOKEN is required. Set it in env and redeploy.");
@@ -67,15 +124,14 @@ async function boot() {
   const { createBot } = await import("./bot.js");
   const { startAlertsLoop } = await import("./features/alerts.js");
 
-  const bot = createBot(cfg.TELEGRAM_BOT_TOKEN);
+  const bot = await createBot(cfg.TELEGRAM_BOT_TOKEN);
 
   try {
     await bot.init();
   } catch (e) {
-    console.warn("[boot] bot.init failed:", safeErr(e));
+    console.warn("[boot] bot.init failed", { err: safeErr(e) });
   }
 
-  // Keep Telegram command menu in sync
   try {
     await bot.api.setMyCommands([
       { command: "start", description: "Welcome and examples" },
@@ -87,41 +143,18 @@ async function boot() {
       { command: "reset", description: "Clear memory" }
     ]);
   } catch (e) {
-    console.warn("[boot] setMyCommands failed:", safeErr(e));
+    console.warn("[boot] setMyCommands failed", { err: safeErr(e) });
   }
 
-  // Alerts loop (optional)
   try {
     startAlertsLoop(bot);
   } catch (e) {
-    console.warn("[alerts] failed to start:", safeErr(e));
+    console.warn("[alerts] failed to start", { err: safeErr(e) });
   }
 
   await startPolling(bot);
+  startPollingCycleLogs();
 
-  // Runner-level error handling (409 overlap, etc.)
-  if (runner) {
-    runner.task.catch(async (e) => {
-      const msg = safeErr(e);
-      console.warn("[runner] task error", { err: msg });
-
-      if ((String(msg).includes("409") || String(msg).toLowerCase().includes("conflict")) && !restarting) {
-        restarting = true;
-        try {
-          console.warn("[runner] conflict detected; restarting polling");
-          try {
-            runner.abort();
-          } catch {}
-          await sleep(2000);
-          await startPolling(bot);
-        } finally {
-          restarting = false;
-        }
-      }
-    });
-  }
-
-  // Lightweight memory log (once per minute)
   setInterval(() => {
     const m = process.memoryUsage();
     console.log("[mem]", {
@@ -132,6 +165,6 @@ async function boot() {
 }
 
 boot().catch((e) => {
-  console.error("[boot] fatal", safeErr(e));
+  console.error("[boot] fatal", { err: safeErr(e) });
   process.exit(1);
 });
