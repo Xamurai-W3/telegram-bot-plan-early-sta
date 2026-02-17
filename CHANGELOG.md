@@ -1,4 +1,9 @@
 
+## 2026-02-17 12:13:35. UTC
+- Request: The bot is not responding to commands. Pls fix it
+- Summary: Fixed command responsiveness by enforcing strict routing order (commands registered before the agent) and ensuring the agent always passes through slash commands via next(). Also fixed the production crash causing the b…
+- Files: .env.sample, package.json, src/bot.js, src/features/agent.js, src/index.js, src/lib/config.js
+
 ## 2026-02-17 11:58:15. UTC
 - Request: The bot is not responding, can you fix thar
 - Summary: Fixed the immediate boot crash (“Unexpected end of input”) by making command registration properly awaited, then hardened polling reliability: webhook deletion on boot, runner concurrency pinned to 1, and a restart loop…
