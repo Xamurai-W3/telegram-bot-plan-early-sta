@@ -1,4 +1,9 @@
 
+## 2026-02-17 13:12:31. UTC
+- Request: check for errors, bot doesnt work and it will show you the error first
+- Summary: Fixed the production crash that was stopping the bot from polling by removing the invalid runner.task.catch usage (runner.task isn’t a Promise in @grammyjs/runner 2.0.3). Polling now starts safely once, always clears we…
+- Files: .env.sample, DOCS.md, README.md, package.json, src/features/agent.js, src/index.js, src/lib/config.js, src/services/watchlist.js
+
 ## 2026-02-17 12:13:35. UTC
 - Request: The bot is not responding to commands. Pls fix it
 - Summary: Fixed command responsiveness by enforcing strict routing order (commands registered before the agent) and ensuring the agent always passes through slash commands via next(). Also fixed the production crash causing the b…
