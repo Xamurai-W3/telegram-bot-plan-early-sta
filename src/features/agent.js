@@ -24,10 +24,23 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
 }
 
+function pickTimeoutMs() {
+  const n = Number(process.env.AI_TIMEOUT_MS || cfg.AI_TIMEOUT_MS || 600000);
+  return Number.isFinite(n) && n > 0 ? n : 600000;
+}
+
 export function registerAgent(bot) {
   bot.on("message:text", async (ctx, next) => {
     const raw = ctx.message?.text || "";
-    if (raw.startsWith("/")) return next();
+
+    if (raw.startsWith("/")) {
+      console.log("[route] slash command passthrough", {
+        chatId: String(ctx.chat?.id || ""),
+        userId: String(ctx.from?.id || ""),
+        text: raw.slice(0, 64)
+      });
+      return next();
+    }
 
     const chatType = ctx.chat?.type || "private";
     const isPrivate = chatType === "private";
@@ -66,20 +79,29 @@ export function registerAgent(bot) {
     const lockKey = `${userId}:${chatId}`;
 
     if (perChatLock.has(lockKey)) {
-      return ctx.reply("I’m working on your last request—please wait.");
+      return ctx.reply("I’m working on your last request…");
     }
 
-    if (globalInflight >= (cfg.GLOBAL_AI_INFLIGHT_MAX || 1)) {
-      return ctx.reply("Busy right now, try again in a moment.");
+    const globalMax = Math.max(1, Number(process.env.GLOBAL_AI_INFLIGHT_MAX || cfg.GLOBAL_AI_INFLIGHT_MAX || 2));
+    if (globalInflight >= globalMax) {
+      return ctx.reply("Busy, try again in a moment.");
     }
 
     perChatLock.add(lockKey);
     globalInflight++;
 
     const started = Date.now();
-    const timeoutMs = Number(cfg.AI_TIMEOUT_MS || 45_000);
+    const timeoutMs = pickTimeoutMs();
 
     try {
+      console.log("[route] agent invoked", {
+        chatId,
+        userId,
+        isPrivate,
+        mentioned: isMentioned,
+        replyToBot: isReplyToBot
+      });
+
       await addTurn({
         mongoUri: cfg.MONGODB_URI,
         platform: "telegram",
@@ -119,26 +141,18 @@ export function registerAgent(bot) {
         textLen: userText.length
       };
 
-      console.log("[ai] agent call start", meta);
-
       const res = await withTimeout(
-        aiChat(cfg, { messages, meta }, { timeoutMs: timeoutMs, retries: cfg.AI_MAX_RETRIES }),
+        aiChat(cfg, { messages, meta }, { timeoutMs, retries: cfg.AI_MAX_RETRIES }),
         timeoutMs + 1500
       );
 
       const reply = String(res?.json?.output?.content || "").trim();
 
-      console.log("[ai] agent call ok", {
-        userId,
-        chatId,
-        ms: Date.now() - started,
-        hasText: !!reply
-      });
-
       if (!res?.ok || !reply) {
-        const msg = res?.status === 412
-          ? "AI isn’t configured yet on the server. Try /help, /trending, or /gem <query>."
-          : "Something went wrong. Please try again.";
+        const msg =
+          res?.status === 412
+            ? "AI isn’t configured yet on the server. Try /help, /trending, or /gem <query>."
+            : "Sorry, I couldn’t generate an analysis right now. Try /gem <query> or /trending.";
 
         await addTurn({
           mongoUri: cfg.MONGODB_URI,
@@ -152,9 +166,7 @@ export function registerAgent(bot) {
         return ctx.reply(msg);
       }
 
-      const finalText = reply.includes("Not financial advice")
-        ? reply
-        : `${reply}\n\n${disclaimerLine()}`;
+      const finalText = reply.includes("Not financial advice") ? reply : `${reply}\n\n${disclaimerLine()}`;
 
       await addTurn({
         mongoUri: cfg.MONGODB_URI,
@@ -165,9 +177,16 @@ export function registerAgent(bot) {
         text: finalText
       });
 
+      console.log("[ai] agent reply ok", {
+        userId,
+        chatId,
+        ms: Date.now() - started,
+        chars: finalText.length
+      });
+
       await ctx.reply(clampText(finalText, 3500));
     } catch (e) {
-      console.warn("[ai] agent call fail", {
+      console.warn("[ai] agent fail", {
         userId,
         chatId,
         ms: Date.now() - started,
